@@ -10,7 +10,8 @@ import (
 	"strings"
 
 	"github.com/saintfish/chardet"
-	"github.com/vifraa/gopom"
+
+	// "github.com/vifraa/gopom"
 	"golang.org/x/net/html/charset"
 
 	"github.com/anchore/syft/internal/log"
@@ -25,40 +26,44 @@ const pomXMLGlob = "*pom.xml"
 var propertyMatcher = regexp.MustCompile("[$][{][^}]+[}]")
 
 func (gap genericArchiveParserAdapter) parserPomXML(_ file.Resolver, _ *generic.Environment, reader file.LocationReadCloser) ([]pkg.Package, []artifact.Relationship, error) {
-	pom, err := decodePomXML(reader)
+	poms, err := decodePomXML(reader)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	var pkgs []pkg.Package
-	if pom.Dependencies != nil {
-		for _, dep := range *pom.Dependencies {
-			p := newPackageFromPom(
-				pom,
-				dep,
-				gap.cfg,
-				reader.Location.WithAnnotation(pkg.EvidenceAnnotationKey, pkg.PrimaryEvidenceAnnotation),
-			)
-			if p.Name == "" {
-				continue
+	if poms != nil {
+		for _, project := range poms {
+			if project.Dependencies != nil {
+				for _, dep := range *project.Dependencies {
+					p := newPackageFromPom(
+						project,
+						dep,
+						gap.cfg,
+						reader.Location.WithAnnotation(pkg.EvidenceAnnotationKey, pkg.PrimaryEvidenceAnnotation),
+					)
+					if p.Name == "" {
+						continue
+					}
+
+					pkgs = append(pkgs, p)
+				}
 			}
-
-			pkgs = append(pkgs, p)
 		}
-	}
 
+	}
 	return pkgs, nil, nil
 }
 
 func parsePomXMLProject(path string, reader io.Reader, location file.Location) (*parsedPomProject, error) {
-	project, err := decodePomXML(reader)
+	project, err := decodePomXMLRemote(reader)
 	if err != nil {
 		return nil, err
 	}
 	return newPomProject(path, project, location), nil
 }
 
-func newPomProject(path string, p gopom.Project, location file.Location) *parsedPomProject {
+func newPomProject(path string, p Project, location file.Location) *parsedPomProject {
 	artifactID := safeString(p.ArtifactID)
 	name := safeString(p.Name)
 	projectURL := safeString(p.URL)
@@ -98,7 +103,7 @@ func newPomProject(path string, p gopom.Project, location file.Location) *parsed
 	}
 }
 
-func newPackageFromPom(pom gopom.Project, dep gopom.Dependency, cfg ArchiveCatalogerConfig, locations ...file.Location) pkg.Package {
+func newPackageFromPom(pom Project, dep Dependency, cfg ArchiveCatalogerConfig, locations ...file.Location) pkg.Package {
 	m := pkg.JavaArchive{
 		PomProperties: &pkg.JavaPomProperties{
 			GroupID:    resolveProperty(pom, dep.GroupID, "groupId"),
@@ -147,8 +152,57 @@ func newPackageFromPom(pom gopom.Project, dep gopom.Dependency, cfg ArchiveCatal
 	return p
 }
 
-func decodePomXML(content io.Reader) (project gopom.Project, err error) {
+func decodePomXML(content file.LocationReadCloser) (project []Project, err error) {
+	var projectPOM Project
+	var projectsPOM Projects
+	errProject := false
+	errProjects := false
+	// Creating an io.Reader using bytes.NewReader for the original JSON data
+	originalReader := io.NopCloser(content)
+
+	// Copying the content of the original reader to a bytes.Buffer
+	var buffer bytes.Buffer
+	teeReader := io.TeeReader(originalReader, &buffer)
+
+	inputReader, err := getUtf8Reader(teeReader)
+
+	if err != nil {
+		return project, fmt.Errorf("unable to read pom.xml: %w", err)
+	}
+
+	decoder := xml.NewDecoder(inputReader)
+	// when an xml file has a character set declaration (e.g. '<?xml version="1.0" encoding="ISO-8859-1"?>') read that and use the correct decoder
+	decoder.CharsetReader = charset.NewReaderLabel
+	if err := decoder.Decode(&projectPOM); err != nil {
+		errProject = true
+	}
+	if !errProject {
+		project = append(project, projectPOM)
+
+	}
+	// Create a new io.Reader using bytes.NewReader for the copied content
+	copyReader := io.NopCloser(bytes.NewReader(buffer.Bytes()))
+	decoderNew := xml.NewDecoder(copyReader)
+	if err := decoderNew.Decode(&projectsPOM); err != nil {
+		errProjects = true
+	}
+	if !errProjects {
+		if projectsPOM.Projects != nil {
+			for _, projects := range *projectsPOM.Projects {
+				project = append(project, projects)
+			}
+		}
+	}
+
+	if errProject && errProjects {
+		return project, fmt.Errorf("unable to unmarshal pom.xml: %w", err)
+	}
+
+	return project, nil
+}
+func decodePomXMLRemote(content io.Reader) (project Project, err error) {
 	inputReader, err := getUtf8Reader(content)
+
 	if err != nil {
 		return project, fmt.Errorf("unable to read pom.xml: %w", err)
 	}
@@ -163,7 +217,6 @@ func decodePomXML(content io.Reader) (project gopom.Project, err error) {
 
 	return project, nil
 }
-
 func getUtf8Reader(content io.Reader) (io.Reader, error) {
 	pomContents, err := io.ReadAll(content)
 	if err != nil {
@@ -191,7 +244,7 @@ func getUtf8Reader(content io.Reader) (io.Reader, error) {
 	return inputReader, nil
 }
 
-func pomParent(pom gopom.Project, parent *gopom.Parent) (result *pkg.JavaPomParent) {
+func pomParent(pom Project, parent *Parent) (result *pkg.JavaPomParent) {
 	if parent == nil {
 		return nil
 	}
@@ -229,7 +282,7 @@ func cleanDescription(original *string) (cleaned string) {
 // If no match is found, the entire expression including ${} is returned
 //
 //nolint:gocognit
-func resolveProperty(pom gopom.Project, property *string, propertyName string) string {
+func resolveProperty(pom Project, property *string, propertyName string) string {
 	propertyCase := safeString(property)
 	log.WithFields("existingPropertyValue", propertyCase, "propertyName", propertyName).Trace("resolving property")
 	return propertyMatcher.ReplaceAllStringFunc(propertyCase, func(match string) string {
@@ -287,7 +340,7 @@ func resolveProperty(pom gopom.Project, property *string, propertyName string) s
 	})
 }
 
-func pomProperties(p gopom.Project) map[string]string {
+func pomProperties(p Project) map[string]string {
 	if p.Properties != nil {
 		return p.Properties.Entries
 	}

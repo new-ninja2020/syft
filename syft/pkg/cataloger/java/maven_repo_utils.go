@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vifraa/gopom"
+	// "github.com/vifraa/gopom"
 
 	"github.com/anchore/syft/internal/log"
 )
@@ -78,7 +78,7 @@ func recursivelyFindLicensesFromParentPom(groupID, artifactID, version string, c
 	return licenses
 }
 
-func getPomFromMavenRepo(groupID, artifactID, version, mavenBaseURL string) (*gopom.Project, error) {
+func getPomFromMavenRepo(groupID, artifactID, version, mavenBaseURL string) (*Project, error) {
 	requestURL, err := formatMavenPomURL(groupID, artifactID, version, mavenBaseURL)
 	if err != nil {
 		return nil, err
@@ -109,7 +109,7 @@ func getPomFromMavenRepo(groupID, artifactID, version, mavenBaseURL string) (*go
 		return nil, fmt.Errorf("unable to parse pom from Maven central: %w", err)
 	}
 
-	pom, err := decodePomXML(strings.NewReader(string(bytes)))
+	pom, err := decodePomXMLRemote(strings.NewReader(string(bytes)))
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse pom from Maven central: %w", err)
 	}
@@ -117,7 +117,7 @@ func getPomFromMavenRepo(groupID, artifactID, version, mavenBaseURL string) (*go
 	return &pom, nil
 }
 
-func parseLicensesFromPom(pom *gopom.Project) []string {
+func parseLicensesFromPom(pom *Project) []string {
 	var licenses []string
 	if pom != nil && pom.Licenses != nil {
 		for _, license := range *pom.Licenses {
