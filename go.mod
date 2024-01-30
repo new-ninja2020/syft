@@ -35,7 +35,7 @@ require (
 	github.com/go-git/go-git/v5 v5.11.0
 	github.com/go-test/deep v1.1.0
 	github.com/google/go-cmp v0.6.0
-	github.com/google/go-containerregistry v0.17.0
+	github.com/google/go-containerregistry v0.19.0
 	github.com/google/licensecheck v0.3.1
 	github.com/google/uuid v1.5.0
 	github.com/gookit/color v1.5.4
@@ -65,7 +65,6 @@ require (
 	github.com/spf13/cobra v1.8.0
 	github.com/stretchr/testify v1.8.4
 	github.com/vbatts/go-mtree v0.5.3
-	github.com/vifraa/gopom v1.0.0
 	github.com/wagoodman/go-partybus v0.0.0-20230516145632-8ccac152c651
 	github.com/wagoodman/go-progress v0.0.0-20230925121702-07e42b3cdba0
 	github.com/xeipuuv/gojsonschema v1.2.0
